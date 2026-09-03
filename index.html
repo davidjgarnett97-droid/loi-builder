@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LOI Builder</title>
+<style>
+  :root {
+    --navy: #0F172A;
+    --accent: #2563EB;
+    --accent-ink: #FFFFFF;
+    --card: #F7FAFF;
+    --card-border: #D7E1F5;
+    --gray: #59616B;
+    --bg: #FDFEFF;
+    --danger: #DC2626;
+    --danger-bg: #FEF2F2;
+    --success: #15803D;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --navy: #E7ECF7;
+      --accent: #5B8DFF;
+      --accent-ink: #0B1220;
+      --card: #16213A;
+      --card-border: #29365A;
+      --gray: #9AA6BF;
+      --bg: #0B1220;
+      --danger: #F87171;
+      --danger-bg: #2A1518;
+      --success: #4ADE80;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--navy);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 92px;
+  }
+
+  header.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--card-border);
+  }
+  header.topbar h1 {
+    font-size: 17px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  header.topbar button.text-btn {
+    background: none;
+    border: none;
+    color: var(--gray);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 4px;
+    cursor: pointer;
+  }
+  header.topbar button.text-btn:active { color: var(--danger); }
+
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  section.block {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gray);
+    margin: 0 0 12px;
+  }
+
+  label.field {
+    display: block;
+    margin-bottom: 12px;
+  }
+  label.field:last-child { margin-bottom: 0; }
+  label.field span.label-text {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--gray);
+    margin-bottom: 5px;
+  }
+  input[type="text"], select, textarea {
+    width: 100%;
+    font-size: 16px;
+    font-family: inherit;
+    color: var(--navy);
+    background: var(--bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 10px 11px;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  input[type="text"]:focus, select:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  input.err, select.err {
+    outline: 2px solid var(--danger);
+    outline-offset: 1px;
+  }
+  .row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  select {
+    background-image: linear-gradient(45deg, transparent 50%, var(--gray) 50%), linear-gradient(135deg, var(--gray) 50%, transparent 50%);
+    background-position: calc(100% - 18px) calc(1em + 2px), calc(100% - 13px) calc(1em + 2px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 32px;
+  }
+
+  .option-card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .option-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+  }
+  .option-head input.opt-label {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 700;
+    background: none;
+    border: none;
+    color: var(--navy);
+    padding: 4px 2px;
+    min-width: 0;
+  }
+  .option-head input.opt-label:focus { outline: none; border-bottom: 1px solid var(--accent); }
+
+  .switch {
+    position: relative;
+    width: 42px;
+    height: 25px;
+    flex-shrink: 0;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track {
+    position: absolute; inset: 0;
+    background: var(--card-border);
+    border-radius: 999px;
+    transition: background .15s;
+  }
+  .switch .track::before {
+    content: "";
+    position: absolute;
+    height: 19px; width: 19px;
+    left: 3px; top: 3px;
+    background: var(--bg);
+    border-radius: 50%;
+    transition: transform .15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::before { transform: translateX(17px); }
+
+  .option-body {
+    padding: 0 16px 16px;
+    border-top: 1px solid var(--card-border);
+  }
+  .option-body { padding-top: 14px; }
+  .option-card.off .option-body { display: none; }
+  .option-card.off { opacity: 0.6; }
+
+  .fields-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
+  }
+  .fields-grid label.field.span-2 { grid-column: 1 / -1; }
+
+  .unit-hint {
+    font-size: 11px;
+    color: var(--gray);
+    margin-top: 3px;
+  }
+
+  .why-block { margin-top: 14px; }
+  .why-add {
+    display: flex;
+    gap: 8px;
+  }
+  .why-add input { flex: 1; }
+  .why-add button {
+    flex-shrink: 0;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 20px;
+    line-height: 1;
+    width: 42px;
+    cursor: pointer;
+  }
+  ul.why-list {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  ul.why-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--card-border);
+    border-radius: 7px;
+    padding: 7px 9px;
+    font-size: 13.5px;
+  }
+  ul.why-list li span { flex: 1; }
+  ul.why-list li button {
+    background: none;
+    border: none;
+    color: var(--gray);
+    font-size: 15px;
+    cursor: pointer;
+    padding: 0 2px;
+    flex-shrink: 0;
+  }
+  ul.why-list li button:active { color: var(--danger); }
+
+  .error-banner {
+    background: var(--danger-bg);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    font-size: 13.5px;
+    display: none;
+  }
+  .error-banner.show { display: block; }
+  .error-banner ul { margin: 6px 0 0; padding-left: 18px; }
+
+  .json-out {
+    width: 100%;
+    min-height: 140px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    resize: vertical;
+  }
+
+  footer.actions {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 20;
+    background: var(--bg);
+    border-top: 1px solid var(--card-border);
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .actions-inner {
+    max-width: 640px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  button.primary {
+    flex: 1;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    border-radius: 9px;
+    padding: 13px 16px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button.primary:active { opacity: 0.85; }
+  .status-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--success);
+    min-width: 64px;
+    text-align: right;
+    opacity: 0;
+    transition: opacity .2s;
+  }
+  .status-text.show { opacity: 1; }
+
+  .help-note {
+    font-size: 12px;
+    color: var(--gray);
+    line-height: 1.5;
+    margin: 4px 0 0;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>LOI Builder</h1>
+  <button class="text-btn" id="clearBtn" type="button">Clear</button>
+</header>
+
+<main>
+  <div class="error-banner" id="errorBanner">
+    <strong>Fix before copying:</strong>
+    <ul id="errorList"></ul>
+  </div>
+
+  <section class="block">
+    <p class="eyebrow">Deal</p>
+    <label class="field">
+      <span class="label-text">Property Address</span>
+      <input type="text" id="propertyAddress" placeholder="123 Main St, City, ST">
+    </label>
+    <div class="row-2">
+      <label class="field">
+        <span class="label-text">Purchased From</span>
+        <input type="text" id="purchasedFrom" placeholder="Seller name">
+      </label>
+      <label class="field">
+        <span class="label-text">Purchased By</span>
+        <input type="text" id="purchasedBy" placeholder="Buyer / entity">
+      </label>
+    </div>
+  </section>
+
+  <p class="eyebrow" style="padding-left:4px;">Purchase Options</p>
+  <div id="optionsContainer"></div>
+
+  <p class="help-note" style="padding:0 4px 8px;">
+    Fill in the options you want on the LOI (up to 4), then copy the JSON and paste it into Claude Code to generate the Slides deck + PDF.
+  </p>
+</main>
+
+<footer class="actions">
+  <div class="actions-inner">
+    <button class="primary" id="copyBtn" type="button">Copy JSON</button>
+    <span class="status-text" id="statusText">Copied ✓</span>
+  </div>
+</footer>
+
+<script>
+const STRUCTURE_FIELDS = {
+  cash: [
+    { key: "price", label: "Price", type: "money" }
+  ],
+  seller_finance: [
+    { key: "price", label: "Price", type: "money" },
+    { key: "down", label: "Down Payment", type: "money" },
+    { key: "length", label: "Term", type: "months" },
+    { key: "balloon", label: "Balloon", type: "months" },
+    { key: "rate", label: "Interest Rate", type: "rate" }
+  ],
+  subject_to: [
+    { key: "existing_balance", label: "Existing Loan Balance", type: "money" },
+    { key: "existing_rate", label: "Existing Rate", type: "rate" },
+    { key: "piti", label: "Monthly PITI", type: "money" },
+    { key: "cash_to_seller", label: "Cash to Seller", type: "money" }
+  ],
+  hybrid: [
+    { key: "existing_balance", label: "Existing Loan Balance", type: "money" },
+    { key: "existing_rate", label: "Existing Rate", type: "rate" },
+    { key: "piti", label: "Monthly PITI", type: "money" },
+    { key: "carry_amount", label: "Seller Carry Amount", type: "money" },
+    { key: "carry_rate", label: "Carry Rate", type: "rate" },
+    { key: "carry_length", label: "Carry Term", type: "months" },
+    { key: "carry_balloon", label: "Carry Balloon", type: "months" },
+    { key: "cash_to_seller", label: "Cash to Seller", type: "money" }
+  ]
+};
+const STRUCTURE_LABELS = {
+  cash: "Cash",
+  seller_finance: "Seller Finance",
+  subject_to: "Subject-To",
+  hybrid: "Hybrid"
+};
+const UNIT_HINT = { money: "e.g. 200,000 (auto-formats to $)", rate: "number only, no %", months: "number of months" };
+
+const STORAGE_KEY = "loi_builder_draft_v1";
+const MAX_OPTIONS = 4;
+
+function defaultOption(i) {
+  return {
+    on: i === 0,
+    label: "Option " + (i + 1),
+    structure: "cash",
+    fields: {},
+    why: []
+  };
+}
+
+let state = {
+  property_address: "",
+  purchased_from: "",
+  purchased_by: "",
+  options: [0,1,2,3].map(defaultOption)
+};
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.options && parsed.options.length === MAX_OPTIONS) state = parsed;
+  } catch (e) {}
+}
+
+function saveDraft() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+function formatMoney(raw) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return "N/A";
+  const digits = trimmed.replace(/[^0-9.]/g, "");
+  if (!digits) return "N/A";
+  const num = parseFloat(digits);
+  if (isNaN(num)) return "N/A";
+  return "$" + num.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function moneyDisplayValue(raw) {
+  if (!raw || raw === "N/A") return "";
+  return raw.replace(/^\$/, "");
+}
+
+const container = document.getElementById("optionsContainer");
+
+function renderOptions() {
+  container.innerHTML = "";
+  state.options.forEach((opt, idx) => {
+    const card = document.createElement("div");
+    card.className = "option-card" + (opt.on ? "" : " off");
+
+    const head = document.createElement("div");
+    head.className = "option-head";
+    head.innerHTML = `
+      <label class="switch">
+        <input type="checkbox" ${opt.on ? "checked" : ""} data-role="toggle" data-idx="${idx}">
+        <span class="track"></span>
+      </label>
+      <input type="text" class="opt-label" data-role="label" data-idx="${idx}" value="${escapeAttr(opt.label)}">
+    `;
+    card.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "option-body";
+
+    const structLabel = document.createElement("label");
+    structLabel.className = "field";
+    structLabel.innerHTML = `<span class="label-text">Deal Structure</span>`;
+    const structSelect = document.createElement("select");
+    structSelect.dataset.role = "structure";
+    structSelect.dataset.idx = idx;
+    Object.keys(STRUCTURE_FIELDS).forEach(key => {
+      const o = document.createElement("option");
+      o.value = key;
+      o.textContent = STRUCTURE_LABELS[key];
+      if (key === opt.structure) o.selected = true;
+      structSelect.appendChild(o);
+    });
+    structLabel.appendChild(structSelect);
+    body.appendChild(structLabel);
+
+    const grid = document.createElement("div");
+    grid.className = "fields-grid";
+    grid.style.marginTop = "12px";
+    STRUCTURE_FIELDS[opt.structure].forEach(f => {
+      const wrap = document.createElement("label");
+      wrap.className = "field" + (f.type === "money" && STRUCTURE_FIELDS[opt.structure].length <= 1 ? " span-2" : "");
+      const currentRaw = opt.fields[f.key] || "";
+      const displayVal = f.type === "money" ? moneyDisplayValue(currentRaw) : currentRaw;
+      wrap.innerHTML = `
+        <span class="label-text">${f.label}</span>
+        <input type="text" inputmode="${f.type === 'months' || f.type === 'rate' ? 'decimal' : 'text'}"
+          data-role="term" data-idx="${idx}" data-key="${f.key}" data-type="${f.type}"
+          value="${escapeAttr(displayVal)}">
+      `;
+      grid.appendChild(wrap);
+    });
+    body.appendChild(grid);
+
+    const whyBlock = document.createElement("div");
+    whyBlock.className = "why-block";
+    whyBlock.innerHTML = `
+      <span class="label-text">Why You Win</span>
+      <div class="why-add" style="margin-top:6px;">
+        <input type="text" placeholder="Add a bullet…" data-role="why-input" data-idx="${idx}">
+        <button type="button" data-role="why-add" data-idx="${idx}">+</button>
+      </div>
+      <ul class="why-list" data-role="why-list" data-idx="${idx}"></ul>
+    `;
+    body.appendChild(whyBlock);
+    const whyList = whyBlock.querySelector('[data-role="why-list"]');
+    opt.why.forEach((bullet, bIdx) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<span>${escapeHtml(bullet)}</span><button type="button" data-role="why-del" data-idx="${idx}" data-bidx="${bIdx}">✕</button>`;
+      whyList.appendChild(li);
+    });
+
+    card.appendChild(body);
+    container.appendChild(card);
+  });
+}
+
+function escapeAttr(s) { return (s || "").replace(/"/g, "&quot;"); }
+function escapeHtml(s) { return (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+container.addEventListener("click", e => {
+  const addBtn = e.target.closest('[data-role="why-add"]');
+  if (addBtn) {
+    const idx = +addBtn.dataset.idx;
+    const input = container.querySelector(`[data-role="why-input"][data-idx="${idx}"]`);
+    const val = input.value.trim();
+    if (val) {
+      state.options[idx].why.push(val);
+      input.value = "";
+      saveDraft();
+      renderOptions();
+    }
+    return;
+  }
+  const delBtn = e.target.closest('[data-role="why-del"]');
+  if (delBtn) {
+    const idx = +delBtn.dataset.idx, bidx = +delBtn.dataset.bidx;
+    state.options[idx].why.splice(bidx, 1);
+    saveDraft();
+    renderOptions();
+  }
+});
+
+container.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.dataset.role === "why-input") {
+    e.preventDefault();
+    e.target.closest(".why-add").querySelector('[data-role="why-add"]').click();
+  }
+});
+
+container.addEventListener("change", e => {
+  const t = e.target;
+  const idx = +t.dataset.idx;
+  if (t.dataset.role === "toggle") {
+    state.options[idx].on = t.checked;
+    saveDraft();
+    renderOptions();
+  } else if (t.dataset.role === "structure") {
+    state.options[idx].structure = t.value;
+    state.options[idx].fields = {};
+    saveDraft();
+    renderOptions();
+  } else if (t.dataset.role === "term") {
+    const key = t.dataset.key, type = t.dataset.type;
+    let val = t.value;
+    if (type === "money") val = formatMoney(val);
+    state.options[idx].fields[key] = val;
+    saveDraft();
+    if (type === "money") renderOptions();
+  }
+});
+
+container.addEventListener("input", e => {
+  const t = e.target;
+  const idx = +t.dataset.idx;
+  if (t.dataset.role === "label") {
+    state.options[idx].label = t.value;
+    saveDraft();
+  }
+});
+
+document.getElementById("propertyAddress").addEventListener("input", e => { state.property_address = e.target.value; saveDraft(); });
+document.getElementById("purchasedFrom").addEventListener("input", e => { state.purchased_from = e.target.value; saveDraft(); });
+document.getElementById("purchasedBy").addEventListener("input", e => { state.purchased_by = e.target.value; saveDraft(); });
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  if (!confirm("Clear the whole form?")) return;
+  localStorage.removeItem(STORAGE_KEY);
+  state = {
+    property_address: "",
+    purchased_from: "",
+    purchased_by: "",
+    options: [0,1,2,3].map(defaultOption)
+  };
+  document.getElementById("propertyAddress").value = "";
+  document.getElementById("purchasedFrom").value = "";
+  document.getElementById("purchasedBy").value = "";
+  hideError();
+  renderOptions();
+});
+
+function hideError() {
+  document.getElementById("errorBanner").classList.remove("show");
+}
+function showError(problems) {
+  const list = document.getElementById("errorList");
+  list.innerHTML = "";
+  problems.forEach(p => {
+    const li = document.createElement("li");
+    li.textContent = p;
+    list.appendChild(li);
+  });
+  document.getElementById("errorBanner").classList.add("show");
+  document.getElementById("errorBanner").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function buildPayload() {
+  const problems = [];
+  if (!state.property_address.trim()) problems.push("Property Address is required");
+  if (!state.purchased_from.trim()) problems.push("Purchased From is required");
+  if (!state.purchased_by.trim()) problems.push("Purchased By is required");
+
+  const activeOptions = state.options.filter(o => o.on);
+  if (activeOptions.length === 0) problems.push("At least one option must be turned on");
+
+  const options = activeOptions.map((opt, i) => {
+    const out = { label: opt.label.trim() || `Option ${i + 1}`, structure: opt.structure };
+    STRUCTURE_FIELDS[opt.structure].forEach(f => {
+      let val = opt.fields[f.key];
+      if (f.type === "money") {
+        val = val || "N/A";
+      } else {
+        val = (val || "").trim();
+      }
+      if ((f.type !== "money") && !val) {
+        problems.push(`"${opt.label}": ${f.label} is required`);
+      }
+      out[f.key] = val;
+    });
+    if (opt.why.length) out.why_you_win = opt.why.slice();
+    return out;
+  });
+
+  return { problems, payload: { property_address: state.property_address.trim(), purchased_from: state.purchased_from.trim(), purchased_by: state.purchased_by.trim(), options } };
+}
+
+document.getElementById("copyBtn").addEventListener("click", async () => {
+  hideError();
+  document.querySelectorAll(".err").forEach(el => el.classList.remove("err"));
+  const { problems, payload } = buildPayload();
+  if (problems.length) {
+    showError(problems);
+    return;
+  }
+  const json = JSON.stringify(payload, null, 2);
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(json);
+    copied = true;
+  } catch (e) {}
+
+  if (!copied) {
+    let out = document.getElementById("jsonFallback");
+    if (!out) {
+      out = document.createElement("section");
+      out.className = "block";
+      out.id = "jsonFallback";
+      out.innerHTML = `<p class="eyebrow">Copy manually</p><textarea class="json-out" readonly></textarea>`;
+      document.querySelector("main").insertBefore(out, document.querySelector(".help-note"));
+    }
+    out.querySelector("textarea").value = json;
+    out.scrollIntoView({ behavior: "smooth", block: "center" });
+    out.querySelector("textarea").select();
+  }
+
+  const status = document.getElementById("statusText");
+  status.textContent = copied ? "Copied ✓" : "See below";
+  status.classList.add("show");
+  setTimeout(() => status.classList.remove("show"), 2200);
+});
+
+loadDraft();
+document.getElementById("propertyAddress").value = state.property_address;
+document.getElementById("purchasedFrom").value = state.purchased_from;
+document.getElementById("purchasedBy").value = state.purchased_by;
+renderOptions();
+</script>
+
+</body>
+</html>
