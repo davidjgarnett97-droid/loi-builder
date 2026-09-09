@@ -412,7 +412,6 @@ const STRUCTURE_LABELS = {
 };
 const UNIT_HINT = { money: "e.g. 200,000 (auto-formats to $)", rate: "number only, no %", months: "number of months" };
 
-const STORAGE_KEY = "loi_builder_draft_v1";
 const MAX_OPTIONS = 4;
 
 function defaultOption(i) {
@@ -432,18 +431,7 @@ let state = {
   options: [0,1,2,3].map(defaultOption)
 };
 
-function loadDraft() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.options && parsed.options.length === MAX_OPTIONS) state = parsed;
-  } catch (e) {}
-}
-
-function saveDraft() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-}
+function saveDraft() {}
 
 function formatMoney(raw) {
   const trimmed = (raw || "").trim();
@@ -609,7 +597,6 @@ document.getElementById("purchasedBy").addEventListener("input", e => { state.pu
 
 document.getElementById("clearBtn").addEventListener("click", () => {
   if (!confirm("Clear the whole form?")) return;
-  localStorage.removeItem(STORAGE_KEY);
   state = {
     property_address: "",
     purchased_from: "",
@@ -703,7 +690,6 @@ document.getElementById("copyBtn").addEventListener("click", async () => {
   setTimeout(() => status.classList.remove("show"), 2200);
 });
 
-loadDraft();
 document.getElementById("propertyAddress").value = state.property_address;
 document.getElementById("purchasedFrom").value = state.purchased_from;
 document.getElementById("purchasedBy").value = state.purchased_by;
