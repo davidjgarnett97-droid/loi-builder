@@ -450,15 +450,20 @@ const UNIT_HINT = { money: "e.g. 200,000 (auto-formats to $)", rate: "number onl
 
 const MAX_OPTIONS = 8;
 
-// Apps Script Web App deployment URL -- set after David deploys Code.gs
-// (see skills/loi_builder/apps_script/ in Core). Placeholder until then;
-// Send to Drive is disabled with a clear message if this isn't set.
-const WEBAPP_URL = "REPLACE_WITH_DEPLOYMENT_URL";
-// Matches the Script Property SHARED_SECRET set in the Apps Script project.
-// This is NOT real security -- it's a public static page, so this value is
-// visible to anyone who views source. It only deters casual discovery of
-// the URL, not a determined actor. See memory/projects/project_loi_builder.md.
-const SHARED_SECRET = "Wg6DvAlsI3rEVXIG2zBximpMTN8LYK4l";
+// loi_builder backend, reachable only over David's tailnet -- see
+// Core/skills/loi_builder/server.py + run_local.py. This page is public
+// (GitHub Pages), but that's fine: the URL only answers to devices on the
+// tailnet, so there's nothing here worth hiding. The PIN below is a second,
+// cheap layer on top of that -- unlike the abandoned Apps Script design,
+// it is a REAL secret (it also gates the endpoint if the tailnet ACL were
+// ever misconfigured), so it is never hardcoded in this public source. It's
+// entered once and kept in this browser's localStorage only.
+const BACKEND_URL = "https://nexus.taild9a970.ts.net/loi/generate";
+const PIN_STORAGE_KEY = "loi_builder_pin";
+
+function getPin() {
+  return localStorage.getItem(PIN_STORAGE_KEY) || "";
+}
 
 function defaultOption(i) {
   return {
@@ -756,9 +761,14 @@ document.getElementById("sendBtn").addEventListener("click", async () => {
     showError(problems);
     return;
   }
-  if (!WEBAPP_URL || WEBAPP_URL === "REPLACE_WITH_DEPLOYMENT_URL") {
-    showError(["Send to Drive isn't configured yet — WEBAPP_URL needs the Apps Script deployment URL. Use Copy JSON for now."]);
-    return;
+  let pin = getPin();
+  if (!pin) {
+    pin = (prompt("Backend PIN (saved on this device only):") || "").trim();
+    if (!pin) {
+      showError(["A PIN is required to send to Drive. Use Copy JSON instead, or enter the PIN."]);
+      return;
+    }
+    localStorage.setItem(PIN_STORAGE_KEY, pin);
   }
 
   const sendBtn = document.getElementById("sendBtn");
@@ -768,11 +778,17 @@ document.getElementById("sendBtn").addEventListener("click", async () => {
   status.classList.add("show");
 
   try {
-    const resp = await fetch(WEBAPP_URL, {
+    const resp = await fetch(BACKEND_URL, {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(Object.assign({ secret: SHARED_SECRET }, payload)),
+      headers: { "Content-Type": "application/json", "X-Access-Pin": pin },
+      body: JSON.stringify(payload),
     });
+    if (resp.status === 401) {
+      localStorage.removeItem(PIN_STORAGE_KEY);
+      status.classList.remove("show");
+      showError(["Wrong PIN — cleared, try Send again to re-enter it."]);
+      return;
+    }
     const result = await resp.json();
     if (result.ok) {
       status.textContent = "Sent ✓";
@@ -783,7 +799,7 @@ document.getElementById("sendBtn").addEventListener("click", async () => {
     }
   } catch (e) {
     status.classList.remove("show");
-    showError(["Network error sending to Drive: " + e.message]);
+    showError(["Couldn't reach the backend — make sure Tailscale is on and connected, then try again. (" + e.message + ")"]);
   } finally {
     sendBtn.disabled = false;
     setTimeout(() => status.classList.remove("show"), 2200);
