@@ -327,6 +327,35 @@
     line-height: 1.5;
     margin: 4px 0 0;
   }
+
+  .result-block {
+    background: var(--danger-bg);
+    border: 1px solid var(--success);
+    background: rgba(21,128,61,0.08);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 14px;
+    font-size: 13.5px;
+    display: none;
+  }
+  .result-block.show { display: block; }
+  .result-block a {
+    display: block;
+    color: var(--accent);
+    font-weight: 700;
+    margin-top: 6px;
+    word-break: break-all;
+  }
+  button.secondary {
+    background: none;
+    border: none;
+    color: var(--gray);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 4px;
+    cursor: pointer;
+  }
+  button.primary[disabled] { opacity: 0.6; }
 </style>
 </head>
 <body>
@@ -338,8 +367,14 @@
 
 <main>
   <div class="error-banner" id="errorBanner">
-    <strong>Fix before copying:</strong>
+    <strong>Fix before sending:</strong>
     <ul id="errorList"></ul>
+  </div>
+
+  <div class="result-block" id="resultBlock">
+    <strong>LOI sent to Drive.</strong>
+    <a id="slidesLink" href="#" target="_blank" rel="noopener">Open Slides →</a>
+    <a id="pdfLink" href="#" target="_blank" rel="noopener">Open PDF →</a>
   </div>
 
   <section class="block">
@@ -364,14 +399,15 @@
   <div id="optionsContainer"></div>
 
   <p class="help-note" style="padding:0 4px 8px;">
-    Fill in the options you want on the LOI (up to 8 — 5+ spill onto a second options page in the deck), then copy the JSON and paste it into Claude Code to generate the Slides deck + PDF.
+    Fill in the options you want on the LOI (up to 8 — 5+ spill onto a second options page in the deck), then tap Send to Drive. No copy/paste, no Claude Code needed.
   </p>
 </main>
 
 <footer class="actions">
   <div class="actions-inner">
-    <button class="primary" id="copyBtn" type="button">Copy JSON</button>
-    <span class="status-text" id="statusText">Copied ✓</span>
+    <button class="secondary" id="copyBtn" type="button">Copy JSON</button>
+    <button class="primary" id="sendBtn" type="button">Send to Drive</button>
+    <span class="status-text" id="statusText">Sent ✓</span>
   </div>
 </footer>
 
@@ -413,6 +449,21 @@ const STRUCTURE_LABELS = {
 const UNIT_HINT = { money: "e.g. 200,000 (auto-formats to $)", rate: "number only, no %", months: "number of months" };
 
 const MAX_OPTIONS = 8;
+
+// loi_builder backend, reachable only over David's tailnet -- see
+// Core/skills/loi_builder/server.py + run_local.py. This page is public
+// (GitHub Pages), but that's fine: the URL only answers to devices on the
+// tailnet, so there's nothing here worth hiding. The PIN below is a second,
+// cheap layer on top of that -- unlike the abandoned Apps Script design,
+// it is a REAL secret (it also gates the endpoint if the tailnet ACL were
+// ever misconfigured), so it is never hardcoded in this public source. It's
+// entered once and kept in this browser's localStorage only.
+const BACKEND_URL = "https://nexus.taild9a970.ts.net/loi/generate";
+const PIN_STORAGE_KEY = "loi_builder_pin";
+
+function getPin() {
+  return localStorage.getItem(PIN_STORAGE_KEY) || "";
+}
 
 function defaultOption(i) {
   return {
@@ -607,6 +658,7 @@ document.getElementById("clearBtn").addEventListener("click", () => {
   document.getElementById("purchasedFrom").value = "";
   document.getElementById("purchasedBy").value = "";
   hideError();
+  hideResult();
   renderOptions();
 });
 
@@ -688,6 +740,70 @@ document.getElementById("copyBtn").addEventListener("click", async () => {
   status.textContent = copied ? "Copied ✓" : "See below";
   status.classList.add("show");
   setTimeout(() => status.classList.remove("show"), 2200);
+});
+
+function hideResult() {
+  document.getElementById("resultBlock").classList.remove("show");
+}
+function showResult(slidesUrl, pdfUrl) {
+  document.getElementById("slidesLink").href = slidesUrl;
+  document.getElementById("pdfLink").href = pdfUrl;
+  document.getElementById("resultBlock").classList.add("show");
+  document.getElementById("resultBlock").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+document.getElementById("sendBtn").addEventListener("click", async () => {
+  hideError();
+  hideResult();
+  document.querySelectorAll(".err").forEach(el => el.classList.remove("err"));
+  const { problems, payload } = buildPayload();
+  if (problems.length) {
+    showError(problems);
+    return;
+  }
+  let pin = getPin();
+  if (!pin) {
+    pin = (prompt("Backend PIN (saved on this device only):") || "").trim();
+    if (!pin) {
+      showError(["A PIN is required to send to Drive. Use Copy JSON instead, or enter the PIN."]);
+      return;
+    }
+    localStorage.setItem(PIN_STORAGE_KEY, pin);
+  }
+
+  const sendBtn = document.getElementById("sendBtn");
+  const status = document.getElementById("statusText");
+  sendBtn.disabled = true;
+  status.textContent = "Sending…";
+  status.classList.add("show");
+
+  try {
+    const resp = await fetch(BACKEND_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Access-Pin": pin },
+      body: JSON.stringify(payload),
+    });
+    if (resp.status === 401) {
+      localStorage.removeItem(PIN_STORAGE_KEY);
+      status.classList.remove("show");
+      showError(["Wrong PIN — cleared, try Send again to re-enter it."]);
+      return;
+    }
+    const result = await resp.json();
+    if (result.ok) {
+      status.textContent = "Sent ✓";
+      showResult(result.slides_url, result.pdf_url);
+    } else {
+      status.classList.remove("show");
+      showError([result.message || result.error || "Send failed — unknown error"]);
+    }
+  } catch (e) {
+    status.classList.remove("show");
+    showError(["Couldn't reach the backend — make sure Tailscale is on and connected, then try again. (" + e.message + ")"]);
+  } finally {
+    sendBtn.disabled = false;
+    setTimeout(() => status.classList.remove("show"), 2200);
+  }
 });
 
 document.getElementById("propertyAddress").value = state.property_address;
