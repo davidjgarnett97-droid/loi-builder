@@ -364,7 +364,7 @@
   <div id="optionsContainer"></div>
 
   <p class="help-note" style="padding:0 4px 8px;">
-    Fill in the options you want on the LOI (up to 4), then copy the JSON and paste it into Claude Code to generate the Slides deck + PDF.
+    Fill in the options you want on the LOI (up to 8 — 5+ spill onto a second options page in the deck), then copy the JSON and paste it into Claude Code to generate the Slides deck + PDF.
   </p>
 </main>
 
@@ -412,7 +412,7 @@ const STRUCTURE_LABELS = {
 };
 const UNIT_HINT = { money: "e.g. 200,000 (auto-formats to $)", rate: "number only, no %", months: "number of months" };
 
-const MAX_OPTIONS = 4;
+const MAX_OPTIONS = 8;
 
 function defaultOption(i) {
   return {
@@ -601,7 +601,7 @@ document.getElementById("clearBtn").addEventListener("click", () => {
     property_address: "",
     purchased_from: "",
     purchased_by: "",
-    options: [0,1,2,3].map(defaultOption)
+    options: [0,1,2,3,4,5,6,7].map(defaultOption)
   };
   document.getElementById("propertyAddress").value = "";
   document.getElementById("purchasedFrom").value = "";
