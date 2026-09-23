@@ -438,13 +438,31 @@ const STRUCTURE_FIELDS = {
     { key: "carry_length", label: "Carry Term", type: "months" },
     { key: "carry_balloon", label: "Carry Balloon", type: "months" },
     { key: "cash_to_seller", label: "Cash to Seller", type: "money" }
+  ],
+  seller_carryback: [
+    { key: "price", label: "Price", type: "money" },
+    { key: "new_loan_amount", label: "New First Mortgage Amount (down payment to seller)", type: "money" },
+    { key: "carry_amount", label: "Seller Carry Amount (2nd position)", type: "money" },
+    { key: "carry_rate", label: "Carry Rate", type: "rate" },
+    { key: "carry_length", label: "Carry Term", type: "months" },
+    { key: "carry_balloon", label: "Carry Balloon", type: "months" }
   ]
 };
+// Optional extra fields for seller_carryback -- only required/sent when that
+// option's "Include First Mortgage Terms" toggle is on. David: needed for
+// offers going to an investor, where the first-position loan's own terms
+// matter to the reader (unlike a normal seller offer, where they don't).
+const FIRST_MORTGAGE_EXTRA_FIELDS = [
+  { key: "first_mortgage_rate", label: "First Mortgage Rate", type: "rate" },
+  { key: "first_mortgage_length", label: "First Mortgage Term", type: "months" },
+  { key: "first_mortgage_payment", label: "First Mortgage Monthly Payment", type: "money" }
+];
 const STRUCTURE_LABELS = {
   cash: "Cash",
   seller_finance: "Seller Finance",
   subject_to: "Subject-To",
-  hybrid: "Hybrid"
+  hybrid: "Hybrid",
+  seller_carryback: "Seller Carry Back"
 };
 const UNIT_HINT = { money: "e.g. 200,000 (auto-formats to $)", rate: "number only, no %", months: "number of months" };
 
@@ -471,7 +489,8 @@ function defaultOption(i) {
     label: "Option " + (i + 1),
     structure: "cash",
     fields: {},
-    why: []
+    why: [],
+    includeFirstMortgageTerms: false
   };
 }
 
@@ -555,6 +574,39 @@ function renderOptions() {
     });
     body.appendChild(grid);
 
+    if (opt.structure === "seller_carryback") {
+      const fmtToggle = document.createElement("div");
+      fmtToggle.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px;";
+      fmtToggle.innerHTML = `
+        <span class="label-text" style="margin-bottom:0;">Include First Mortgage Terms</span>
+        <label class="switch">
+          <input type="checkbox" ${opt.includeFirstMortgageTerms ? "checked" : ""} data-role="fmt-toggle" data-idx="${idx}">
+          <span class="track"></span>
+        </label>
+      `;
+      body.appendChild(fmtToggle);
+
+      if (opt.includeFirstMortgageTerms) {
+        const fmtGrid = document.createElement("div");
+        fmtGrid.className = "fields-grid";
+        fmtGrid.style.marginTop = "12px";
+        FIRST_MORTGAGE_EXTRA_FIELDS.forEach(f => {
+          const wrap = document.createElement("label");
+          wrap.className = "field";
+          const currentRaw = opt.fields[f.key] || "";
+          const displayVal = f.type === "money" ? moneyDisplayValue(currentRaw) : currentRaw;
+          wrap.innerHTML = `
+            <span class="label-text">${f.label}</span>
+            <input type="text" inputmode="${f.type === 'months' || f.type === 'rate' ? 'decimal' : 'text'}"
+              data-role="term" data-idx="${idx}" data-key="${f.key}" data-type="${f.type}"
+              value="${escapeAttr(displayVal)}">
+          `;
+          fmtGrid.appendChild(wrap);
+        });
+        body.appendChild(fmtGrid);
+      }
+    }
+
     const whyBlock = document.createElement("div");
     whyBlock.className = "why-block";
     whyBlock.innerHTML = `
@@ -621,6 +673,11 @@ container.addEventListener("change", e => {
   } else if (t.dataset.role === "structure") {
     state.options[idx].structure = t.value;
     state.options[idx].fields = {};
+    state.options[idx].includeFirstMortgageTerms = false;
+    saveDraft();
+    renderOptions();
+  } else if (t.dataset.role === "fmt-toggle") {
+    state.options[idx].includeFirstMortgageTerms = t.checked;
     saveDraft();
     renderOptions();
   } else if (t.dataset.role === "term") {
@@ -700,6 +757,21 @@ function buildPayload() {
       }
       out[f.key] = val;
     });
+    if (opt.structure === "seller_carryback") {
+      out.include_first_mortgage_terms = !!opt.includeFirstMortgageTerms;
+      if (opt.includeFirstMortgageTerms) {
+        FIRST_MORTGAGE_EXTRA_FIELDS.forEach(f => {
+          let val = opt.fields[f.key];
+          if (f.type === "money") {
+            val = val || "N/A";
+          } else {
+            val = (val || "").trim();
+            if (!val) problems.push(`"${opt.label}": ${f.label} is required`);
+          }
+          out[f.key] = val;
+        });
+      }
+    }
     if (opt.why.length) out.why_you_win = opt.why.slice();
     return out;
   });
