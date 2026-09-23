@@ -479,7 +479,7 @@ let state = {
   property_address: "",
   purchased_from: "",
   purchased_by: "",
-  options: [0,1,2,3].map(defaultOption)
+  options: Array.from({length: MAX_OPTIONS}, (_, i) => defaultOption(i))
 };
 
 function saveDraft() {}
