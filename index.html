@@ -308,6 +308,43 @@
   }
   ul.why-list li button:active { color: var(--danger); }
 
+  .uw-toggle {
+    margin-top: 14px;
+    width: 100%;
+    background: none;
+    border: 1px solid var(--card-border);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .uw-panel {
+    margin-top: 10px;
+    background: var(--bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .uw-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .uw-row:last-child { border-bottom: none; }
+  .uw-row .k { color: var(--gray); }
+  .uw-row .v { font-weight: 700; text-align: right; }
+  .uw-note {
+    font-size: 11px;
+    color: var(--gray);
+    margin-top: 8px;
+    line-height: 1.45;
+  }
+
   .error-banner {
     background: var(--danger-bg);
     border: 1px solid var(--danger);
@@ -478,12 +515,14 @@ const STRUCTURE_FIELDS = {
   subject_to: [
     { key: "existing_balance", label: "Existing Loan Balance", type: "money" },
     { key: "existing_rate", label: "Existing Rate", type: "rate" },
+    { key: "existing_remaining_term", label: "Existing Loan Remaining Term (optional)", type: "months" },
     { key: "piti", label: "Monthly PITI", type: "money" },
     { key: "cash_to_seller", label: "Cash to Seller", type: "money" }
   ],
   hybrid: [
     { key: "existing_balance", label: "Existing Loan Balance", type: "money" },
     { key: "existing_rate", label: "Existing Rate", type: "rate" },
+    { key: "existing_remaining_term", label: "Existing Loan Remaining Term (optional)", type: "months" },
     { key: "piti", label: "Monthly PITI", type: "money" },
     { key: "carry_amount", label: "Seller Carry Amount", type: "money" },
     { key: "carry_rate", label: "Carry Rate", type: "rate" },
@@ -542,9 +581,15 @@ function defaultOption(i) {
     structure: "cash",
     fields: {},
     why: [],
-    includeFirstMortgageTerms: false
+    includeFirstMortgageTerms: false,
+    showUnderwriting: false
   };
 }
+
+// Fields that don't block Send even when left blank -- underwriting math
+// degrades gracefully (see computeUnderwriting) rather than requiring input
+// the deal itself might not need.
+const OPTIONAL_TERM_FIELDS = new Set(["existing_remaining_term"]);
 
 let state = {
   property_address: "",
@@ -792,6 +837,24 @@ function renderOptions() {
       whyList.appendChild(li);
     });
 
+    if (opt.structure !== "cash") {
+      const uwWrap = document.createElement("div");
+      const uwBtn = document.createElement("button");
+      uwBtn.type = "button";
+      uwBtn.className = "uw-toggle";
+      uwBtn.dataset.role = "uw-toggle";
+      uwBtn.dataset.idx = idx;
+      uwBtn.textContent = opt.showUnderwriting ? "Hide Underwriting ▲" : "Show Underwriting ▼";
+      uwWrap.appendChild(uwBtn);
+      if (opt.showUnderwriting) {
+        const uwPanel = document.createElement("div");
+        uwPanel.className = "uw-panel";
+        uwPanel.innerHTML = renderUnderwritingPanel(opt);
+        uwWrap.appendChild(uwPanel);
+      }
+      body.appendChild(uwWrap);
+    }
+
     card.appendChild(body);
     container.appendChild(card);
   });
@@ -799,6 +862,151 @@ function renderOptions() {
 
 function escapeAttr(s) { return (s || "").replace(/"/g, "&quot;"); }
 function escapeHtml(s) { return (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+// ---- Underwriting math (mirrors execution/re_wholesaling/underwriting_instruments.html,
+// terms in months not years since that's how this form already collects them) ----
+
+function pm(raw) {
+  if (!raw) return 0;
+  const n = parseFloat(String(raw).replace(/[^0-9.-]/g, ""));
+  return isFinite(n) ? n : 0;
+}
+const pn = pm;
+
+function tranchePaymentM(principal, ratePct, termMonths) {
+  const r = (ratePct || 0) / 100 / 12;
+  const n = termMonths;
+  if (!n || n <= 0) return 0;
+  if (r <= 0) return principal / n;
+  return principal * r / (1 - Math.pow(1 + r, -n));
+}
+
+function remainingBalanceM(principal, ratePct, termMonths, monthsElapsed) {
+  const r = (ratePct || 0) / 100 / 12;
+  const n = termMonths;
+  const k = Math.max(0, Math.min(monthsElapsed, n));
+  if (!n || n <= 0) return principal;
+  if (r <= 0) return Math.max(0, principal - (principal / n) * k);
+  const payment = tranchePaymentM(principal, ratePct, n);
+  const bal = principal * Math.pow(1 + r, k) - payment * ((Math.pow(1 + r, k) - 1) / r);
+  return Math.max(0, bal);
+}
+
+function loanStatsM(principal, ratePct, termMonths, balloonMonths) {
+  const payment = tranchePaymentM(principal, ratePct, termMonths);
+  const totalInterestFullTerm = termMonths > 0 ? (payment * termMonths - principal) : 0;
+  const k = balloonMonths > 0 ? Math.min(balloonMonths, termMonths) : termMonths;
+  const paidToBalloon = payment * k;
+  const payoff = remainingBalanceM(principal, ratePct, termMonths, k);
+  const totalInterestToBalloon = paidToBalloon - (principal - payoff);
+  const allIn = paidToBalloon + payoff;
+  const fullyAmortized = termMonths > 0 && k >= termMonths;
+  return { payment, totalInterestFullTerm, paidToBalloon, payoff, totalInterestToBalloon, allIn, fullyAmortized };
+}
+
+function uwRow(label, value) { return { label, value }; }
+function mm(n) { return formatMoney(String(Math.round(n))); }
+
+function computeUnderwriting(opt) {
+  const f = opt.fields;
+
+  if (opt.structure === "cash") {
+    return { rows: [], note: "Cash offer — no financing to underwrite." };
+  }
+
+  if (opt.structure === "seller_finance") {
+    const price = pm(f.price), down = pm(f.down), rate = pn(f.rate), term = pn(f.length), balloon = pn(f.balloon);
+    const principal = Math.max(0, price - down);
+    if (!term) return { rows: [], note: "Enter a term to compute payment math." };
+    const s = loanStatsM(principal, rate, term, balloon);
+    return {
+      rows: [
+        uwRow("Financed Principal", mm(principal)),
+        uwRow("Monthly Payment", mm(s.payment)),
+        uwRow("Balloon Payoff Due", s.fullyAmortized ? "$0 (fully amortized)" : mm(s.payoff)),
+        uwRow("Total Interest to Balloon", mm(s.totalInterestToBalloon)),
+        uwRow("Total Interest at Full Term", mm(s.totalInterestFullTerm)),
+        uwRow("All-In Total at Balloon", mm(s.allIn))
+      ],
+      note: "Payment = amortizing P&I on the financed principal (price − down) at the stated rate/term. Balloon payoff is the remaining balance owed at the balloon date."
+    };
+  }
+
+  if (opt.structure === "subject_to" || opt.structure === "hybrid") {
+    const balance = pm(f.existing_balance), exRate = pn(f.existing_rate), remTerm = pn(f.existing_remaining_term), piti = pm(f.piti);
+    const rows = [];
+    let note;
+    if (!remTerm) {
+      rows.push(uwRow("Stated Monthly PITI", mm(piti)));
+      note = "Enter the existing loan's remaining term to break this out into real principal/interest instead of just the stated PITI.";
+    } else {
+      const pAndI = tranchePaymentM(balance, exRate, remTerm);
+      const totalInterest = pAndI * remTerm - balance;
+      rows.push(uwRow("Existing Note — Computed P&I", mm(pAndI)));
+      rows.push(uwRow("Existing Note — Stated PITI", mm(piti)));
+      rows.push(uwRow("Existing Note — Total Interest (Remaining Term)", mm(totalInterest)));
+      rows.push(uwRow("Existing Note — Payoff at Term End", "$0 (fully amortizing)"));
+      note = "Computed P&I is principal+interest only on the existing balance/rate/remaining term — stated PITI runs higher if it includes taxes/insurance.";
+    }
+    if (opt.structure === "hybrid") {
+      const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = pn(f.carry_length), carryBalloon = pn(f.carry_balloon);
+      if (carryTerm) {
+        const cs = loanStatsM(carryAmt, carryRate, carryTerm, carryBalloon);
+        rows.push(uwRow("Seller Carry — Monthly Payment", mm(cs.payment)));
+        rows.push(uwRow("Seller Carry — Balloon Payoff Due", cs.fullyAmortized ? "$0 (fully amortized)" : mm(cs.payoff)));
+        rows.push(uwRow("Seller Carry — Total Interest to Balloon", mm(cs.totalInterestToBalloon)));
+        rows.push(uwRow("Seller Carry — All-In Total at Balloon", mm(cs.allIn)));
+        rows.push(uwRow("Combined Monthly Payment (PITI + Carry)", mm(piti + cs.payment)));
+      } else {
+        rows.push(uwRow("Seller Carry", "Enter a carry term to compute payment math."));
+      }
+    }
+    rows.push(uwRow("Cash to Seller (stated)", mm(pm(f.cash_to_seller))));
+    return { rows, note };
+  }
+
+  if (opt.structure === "seller_carryback") {
+    const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = pn(f.carry_length), carryBalloon = pn(f.carry_balloon);
+    const rows = [];
+    let combinedMonthly = 0;
+    if (opt.includeFirstMortgageTerms) {
+      const fmPayment = pm(f.first_mortgage_payment), fmTerm = pn(f.first_mortgage_length), fmLoan = pm(f.new_loan_amount);
+      const fmTotalInterest = fmPayment * fmTerm - fmLoan;
+      rows.push(uwRow("1st Mortgage — Stated Payment", mm(fmPayment)));
+      rows.push(uwRow("1st Mortgage — Total Interest (Full Term, from stated payment)", mm(fmTotalInterest)));
+      combinedMonthly += fmPayment;
+    } else {
+      rows.push(uwRow("1st Mortgage", "Toggle \"Include First Mortgage Terms\" to add its payment to the combined total."));
+    }
+    if (carryTerm) {
+      const s = loanStatsM(carryAmt, carryRate, carryTerm, carryBalloon);
+      rows.push(uwRow("Seller Carry (2nd) — Monthly Payment", mm(s.payment)));
+      rows.push(uwRow("Seller Carry (2nd) — Balloon Payoff Due", s.fullyAmortized ? "$0 (fully amortized)" : mm(s.payoff)));
+      rows.push(uwRow("Seller Carry (2nd) — Total Interest to Balloon", mm(s.totalInterestToBalloon)));
+      rows.push(uwRow("Seller Carry (2nd) — Total Interest at Full Term", mm(s.totalInterestFullTerm)));
+      rows.push(uwRow("Seller Carry (2nd) — All-In Total at Balloon", mm(s.allIn)));
+      combinedMonthly += s.payment;
+      rows.push(uwRow("Combined Monthly Payment (1st + 2nd)", mm(combinedMonthly)));
+    } else {
+      rows.push(uwRow("Seller Carry (2nd)", "Enter a carry term to compute payment math."));
+    }
+    return {
+      rows,
+      note: "1st mortgage total interest is derived from the stated monthly payment (only the payment is required input), not re-derived from a separate rate/term amortization. Seller carry (2nd) is a full amortization off its own rate/term/balloon."
+    };
+  }
+
+  return { rows: [], note: "" };
+}
+
+function renderUnderwritingPanel(opt) {
+  const result = computeUnderwriting(opt);
+  const rowsHtml = result.rows.map(r =>
+    `<div class="uw-row"><span class="k">${escapeHtml(r.label)}</span><span class="v">${escapeHtml(r.value)}</span></div>`
+  ).join("");
+  const noteHtml = result.note ? `<div class="uw-note">${escapeHtml(result.note)}</div>` : "";
+  return rowsHtml + noteHtml;
+}
 
 container.addEventListener("click", e => {
   const addBtn = e.target.closest('[data-role="why-add"]');
@@ -819,6 +1027,13 @@ container.addEventListener("click", e => {
     const idx = +delBtn.dataset.idx, bidx = +delBtn.dataset.bidx;
     state.options[idx].why.splice(bidx, 1);
     saveDraft();
+    renderOptions();
+    return;
+  }
+  const uwBtn = e.target.closest('[data-role="uw-toggle"]');
+  if (uwBtn) {
+    const idx = +uwBtn.dataset.idx;
+    state.options[idx].showUnderwriting = !state.options[idx].showUnderwriting;
     renderOptions();
   }
 });
@@ -853,7 +1068,9 @@ container.addEventListener("change", e => {
     if (type === "money") val = formatMoney(val);
     state.options[idx].fields[key] = val;
     saveDraft();
-    if (type === "money") renderOptions();
+    // Always re-render (this fires on blur/Enter, not per keystroke) so an
+    // open underwriting panel picks up the new value immediately.
+    renderOptions();
   }
 });
 
@@ -914,12 +1131,12 @@ function buildPayload() {
     const out = { label: opt.label.trim() || `Option ${i + 1}`, structure: opt.structure };
     STRUCTURE_FIELDS[opt.structure].forEach(f => {
       let val = opt.fields[f.key];
-      if (f.type === "money") {
+      if (f.type === "money" || OPTIONAL_TERM_FIELDS.has(f.key)) {
         val = val || "N/A";
       } else {
         val = (val || "").trim();
       }
-      if ((f.type !== "money") && !val) {
+      if (f.type !== "money" && !OPTIONAL_TERM_FIELDS.has(f.key) && !val) {
         problems.push(`"${opt.label}": ${f.label} is required`);
       }
       out[f.key] = val;
