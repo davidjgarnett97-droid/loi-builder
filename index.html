@@ -72,6 +72,52 @@
   }
   header.topbar button.text-btn:active { color: var(--danger); }
 
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .templates-menu {
+    position: relative;
+  }
+  .templates-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 6px 4px;
+    cursor: pointer;
+  }
+  .templates-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 200px;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 9px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    z-index: 30;
+    overflow: hidden;
+  }
+  .templates-dropdown.show { display: block; }
+  .templates-dropdown button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--navy);
+    font-size: 13.5px;
+    font-weight: 600;
+    padding: 11px 14px;
+    cursor: pointer;
+  }
+  .templates-dropdown button:active { background: var(--bg); }
+  .templates-dropdown button + button { border-top: 1px solid var(--card-border); }
+
   main {
     max-width: 640px;
     margin: 0 auto;
@@ -362,7 +408,13 @@
 
 <header class="topbar">
   <h1>LOI Builder</h1>
-  <button class="text-btn" id="clearBtn" type="button">Clear</button>
+  <div class="topbar-right">
+    <div class="templates-menu" id="templatesMenu">
+      <button class="templates-btn" id="templatesBtn" type="button">Templates ▾</button>
+      <div class="templates-dropdown" id="templatesDropdown"></div>
+    </div>
+    <button class="text-btn" id="clearBtn" type="button">Clear</button>
+  </div>
 </header>
 
 <main>
@@ -517,6 +569,121 @@ function moneyDisplayValue(raw) {
   if (!raw || raw === "N/A") return "";
   return raw.replace(/^\$/, "");
 }
+
+// Prebuilt option templates. Each `apply(askingPrice)` returns 4 option
+// objects (see defaultOption shape) that overwrite state.options[0..3].
+// Ladder locked in 2026-09-29 (see Core memory: project_loi_builder.md) --
+// reverse-engineered from a real LOI (140 Senora PL) and confirmed as the
+// standing default: cash anchors low to make the other 3 look better by
+// contrast, price scales up as seller concessions (rate, balloon) do.
+function roundTo(n, nearest) { return Math.round(n / nearest) * nearest; }
+
+const TEMPLATES = {
+  seller_finance_menu: {
+    label: "Seller Finance Menu",
+    apply(asking) {
+      const cash = roundTo(asking * 0.65, 1000);
+      const base = roundTo(asking * 1.00, 1000);
+      const premium = roundTo(asking * 1.23, 1000);
+      const carryTotal = roundTo(asking * 1.05, 1000);
+      const carryHalf = roundTo(carryTotal / 2, 500);
+
+      return [
+        {
+          on: true, label: "Option 1 — Cash", structure: "cash",
+          fields: { price: formatMoney(String(cash)) },
+          why: [
+            "Quick close (10 days). As-is purchase. No inspection. No buyer concessions.",
+            "!! Please Don't Take This Option !!"
+          ],
+          includeFirstMortgageTerms: false
+        },
+        {
+          on: true, label: "Option 2 — Seller Finance", structure: "seller_finance",
+          fields: { price: formatMoney(String(base)), down: "N/A", length: "30", balloon: "10", rate: "3" },
+          why: [],
+          includeFirstMortgageTerms: false
+        },
+        {
+          on: true, label: "Option 3 — Seller Finance", structure: "seller_finance",
+          fields: { price: formatMoney(String(premium)), down: "N/A", length: "30", balloon: "7", rate: "0" },
+          why: [
+            "You get a shorter Balloon",
+            "Interest is baked into the purchase price"
+          ],
+          includeFirstMortgageTerms: false
+        },
+        {
+          on: true, label: "Option 4 — Seller Carryback", structure: "seller_carryback",
+          fields: {
+            price: formatMoney(String(carryTotal)),
+            new_loan_amount: formatMoney(String(carryHalf)),
+            carry_amount: formatMoney(String(carryHalf)),
+            carry_rate: "1", carry_length: "30", carry_balloon: "10"
+          },
+          why: [
+            "Money in your pocket today",
+            "Higher purchase price"
+          ],
+          includeFirstMortgageTerms: false
+        }
+      ];
+    }
+  }
+};
+
+function renderTemplatesMenu() {
+  const dropdown = document.getElementById("templatesDropdown");
+  dropdown.innerHTML = "";
+  Object.keys(TEMPLATES).forEach(key => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = TEMPLATES[key].label;
+    btn.dataset.templateKey = key;
+    dropdown.appendChild(btn);
+  });
+}
+
+function closeTemplatesDropdown() {
+  document.getElementById("templatesDropdown").classList.remove("show");
+}
+
+document.getElementById("templatesBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  document.getElementById("templatesDropdown").classList.toggle("show");
+});
+
+document.getElementById("templatesDropdown").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-template-key]");
+  if (!btn) return;
+  closeTemplatesDropdown();
+
+  const template = TEMPLATES[btn.dataset.templateKey];
+  const raw = prompt(`Asking price for "${template.label}"?`);
+  if (raw === null) return;
+  const digits = raw.replace(/[^0-9.]/g, "");
+  const asking = parseFloat(digits);
+  if (!digits || isNaN(asking) || asking <= 0) {
+    showError(["Enter a valid asking price (numbers only) to apply a template."]);
+    return;
+  }
+
+  const filled = template.apply(asking);
+  filled.forEach((opt, i) => { state.options[i] = opt; });
+  saveDraft();
+  renderOptions();
+
+  const status = document.getElementById("statusText");
+  status.textContent = "Template applied ✓";
+  status.classList.add("show");
+  setTimeout(() => status.classList.remove("show"), 2200);
+});
+
+document.addEventListener("click", e => {
+  if (!document.getElementById("templatesMenu").contains(e.target)) closeTemplatesDropdown();
+});
+
+renderTemplatesMenu();
 
 const container = document.getElementById("optionsContainer");
 
