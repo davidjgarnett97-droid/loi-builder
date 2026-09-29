@@ -1350,7 +1350,13 @@ function resolveFieldValue(opt, f, problems) {
       if (!OPTIONAL_TERM_FIELDS.has(f.key)) problems.push(`"${opt.label}": ${f.label} is required`);
       return "N/A";
     }
-    return String(roundUnitValue(monthsOf(opt, f.key), "months"));
+    // Send the number with whichever unit is actually selected on this
+    // field (e.g. "30 yr" or "18 mo") instead of collapsing to a month
+    // count -- the generated LOI card should show what was picked, not a
+    // silently-converted equivalent. execution.py's _fmt_months passes a
+    // pre-suffixed value straight through.
+    const suffix = fieldUnit(opt, f.key) === "years" ? "yr" : "mo";
+    return `${trimmed} ${suffix}`;
   }
   const val = (raw || "").trim();
   if (!val) problems.push(`"${opt.label}": ${f.label} is required`);
