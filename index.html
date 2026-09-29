@@ -260,6 +260,34 @@
     margin-top: 3px;
   }
 
+  .term-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+  }
+  .term-input-row input { flex: 1; min-width: 0; }
+  .unit-toggle {
+    display: flex;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .unit-toggle button {
+    background: var(--bg);
+    border: none;
+    color: var(--gray);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0 11px;
+    cursor: pointer;
+  }
+  .unit-toggle button + button { border-left: 1px solid var(--card-border); }
+  .unit-toggle button.active {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
   .why-block { margin-top: 14px; }
   .why-add {
     display: flex;
@@ -580,6 +608,7 @@ function defaultOption(i) {
     label: "Option " + (i + 1),
     structure: "cash",
     fields: {},
+    units: {},
     why: [],
     includeFirstMortgageTerms: false,
     showUnderwriting: false
@@ -590,6 +619,18 @@ function defaultOption(i) {
 // degrades gracefully (see computeUnderwriting) rather than requiring input
 // the deal itself might not need.
 const OPTIONAL_TERM_FIELDS = new Set(["existing_remaining_term"]);
+
+// Term/balloon fields (type "months") can be entered in months or years --
+// the entered number is reinterpreted, not just relabeled, when the unit is
+// switched (30 "mo" -> 2.5 "yr", not 30 "yr"), and always converts back to
+// months before hitting the backend (execution.py's _fmt_months always
+// renders "N mo" -- months is the wire format regardless of input unit).
+function fieldUnit(opt, key) { return (opt.units && opt.units[key]) || "months"; }
+function monthsOf(opt, key) {
+  const raw = pn(opt.fields[key]);
+  return fieldUnit(opt, key) === "years" ? raw * 12 : raw;
+}
+function roundUnitValue(v, unit) { return unit === "years" ? Math.round(v * 100) / 100 : Math.round(v); }
 
 let state = {
   property_address: "",
@@ -732,6 +773,34 @@ renderTemplatesMenu();
 
 const container = document.getElementById("optionsContainer");
 
+function fieldInputHtml(opt, idx, f) {
+  const currentRaw = opt.fields[f.key] || "";
+  if (f.type === "months") {
+    const unit = fieldUnit(opt, f.key);
+    return `
+      <span class="label-text">${f.label}</span>
+      <div class="term-input-row">
+        <input type="text" inputmode="decimal"
+          data-role="term" data-idx="${idx}" data-key="${f.key}" data-type="${f.type}"
+          value="${escapeAttr(currentRaw)}">
+        <div class="unit-toggle">
+          <button type="button" data-role="unit-btn" data-idx="${idx}" data-key="${f.key}" data-unit="months"
+            class="${unit === "months" ? "active" : ""}">Mo</button>
+          <button type="button" data-role="unit-btn" data-idx="${idx}" data-key="${f.key}" data-unit="years"
+            class="${unit === "years" ? "active" : ""}">Yr</button>
+        </div>
+      </div>
+    `;
+  }
+  const displayVal = f.type === "money" ? moneyDisplayValue(currentRaw) : currentRaw;
+  return `
+    <span class="label-text">${f.label}</span>
+    <input type="text" inputmode="${f.type === 'rate' ? 'decimal' : 'text'}"
+      data-role="term" data-idx="${idx}" data-key="${f.key}" data-type="${f.type}"
+      value="${escapeAttr(displayVal)}">
+  `;
+}
+
 function renderOptions() {
   container.innerHTML = "";
   state.options.forEach((opt, idx) => {
@@ -774,14 +843,7 @@ function renderOptions() {
     STRUCTURE_FIELDS[opt.structure].forEach(f => {
       const wrap = document.createElement("label");
       wrap.className = "field" + (f.type === "money" && STRUCTURE_FIELDS[opt.structure].length <= 1 ? " span-2" : "");
-      const currentRaw = opt.fields[f.key] || "";
-      const displayVal = f.type === "money" ? moneyDisplayValue(currentRaw) : currentRaw;
-      wrap.innerHTML = `
-        <span class="label-text">${f.label}</span>
-        <input type="text" inputmode="${f.type === 'months' || f.type === 'rate' ? 'decimal' : 'text'}"
-          data-role="term" data-idx="${idx}" data-key="${f.key}" data-type="${f.type}"
-          value="${escapeAttr(displayVal)}">
-      `;
+      wrap.innerHTML = fieldInputHtml(opt, idx, f);
       grid.appendChild(wrap);
     });
     body.appendChild(grid);
@@ -805,14 +867,7 @@ function renderOptions() {
         FIRST_MORTGAGE_EXTRA_FIELDS.forEach(f => {
           const wrap = document.createElement("label");
           wrap.className = "field";
-          const currentRaw = opt.fields[f.key] || "";
-          const displayVal = f.type === "money" ? moneyDisplayValue(currentRaw) : currentRaw;
-          wrap.innerHTML = `
-            <span class="label-text">${f.label}</span>
-            <input type="text" inputmode="${f.type === 'months' || f.type === 'rate' ? 'decimal' : 'text'}"
-              data-role="term" data-idx="${idx}" data-key="${f.key}" data-type="${f.type}"
-              value="${escapeAttr(displayVal)}">
-          `;
+          wrap.innerHTML = fieldInputHtml(opt, idx, f);
           fmtGrid.appendChild(wrap);
         });
         body.appendChild(fmtGrid);
@@ -931,7 +986,7 @@ function computeUnderwriting(opt) {
   }
 
   if (opt.structure === "seller_finance") {
-    const price = pm(f.price), down = pm(f.down), rate = pn(f.rate), term = pn(f.length), balloon = pn(f.balloon);
+    const price = pm(f.price), down = pm(f.down), rate = pn(f.rate), term = monthsOf(opt, "length"), balloon = monthsOf(opt, "balloon");
     const principal = Math.max(0, price - down);
     if (!term) return { rows: [], note: "Enter a term to compute payment math." };
     const s = loanStatsM(principal, rate, term, balloon);
@@ -950,7 +1005,7 @@ function computeUnderwriting(opt) {
   }
 
   if (opt.structure === "subject_to" || opt.structure === "hybrid") {
-    const balance = pm(f.existing_balance), exRate = pn(f.existing_rate), remTerm = pn(f.existing_remaining_term), piti = pm(f.piti);
+    const balance = pm(f.existing_balance), exRate = pn(f.existing_rate), remTerm = monthsOf(opt, "existing_remaining_term"), piti = pm(f.piti);
     const rows = [];
     let note;
     if (!remTerm) {
@@ -967,7 +1022,7 @@ function computeUnderwriting(opt) {
       note = "Computed P&I is principal+interest only on the existing balance/rate/remaining term — stated PITI runs higher if it includes taxes/insurance.";
     }
     if (opt.structure === "hybrid") {
-      const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = pn(f.carry_length), carryBalloon = pn(f.carry_balloon);
+      const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = monthsOf(opt, "carry_length"), carryBalloon = monthsOf(opt, "carry_balloon");
       if (carryTerm) {
         const cs = loanStatsM(carryAmt, carryRate, carryTerm, carryBalloon);
         rows.push(uwRow("Seller Carry — Monthly Payment", mm(cs.payment)));
@@ -985,11 +1040,11 @@ function computeUnderwriting(opt) {
   }
 
   if (opt.structure === "seller_carryback") {
-    const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = pn(f.carry_length), carryBalloon = pn(f.carry_balloon);
+    const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = monthsOf(opt, "carry_length"), carryBalloon = monthsOf(opt, "carry_balloon");
     const rows = [];
     let combinedMonthly = 0;
     if (opt.includeFirstMortgageTerms) {
-      const fmPayment = pm(f.first_mortgage_payment), fmTerm = pn(f.first_mortgage_length), fmLoan = pm(f.new_loan_amount);
+      const fmPayment = pm(f.first_mortgage_payment), fmTerm = monthsOf(opt, "first_mortgage_length"), fmLoan = pm(f.new_loan_amount);
       const fmRate = pn(f.first_mortgage_rate);
       const fmTotalInterest = fmPayment * fmTerm - fmLoan;
       rows.push(uwRow("1st Mortgage — Stated Payment", mm(fmPayment)));
@@ -1057,6 +1112,25 @@ container.addEventListener("click", e => {
     const idx = +uwBtn.dataset.idx;
     state.options[idx].showUnderwriting = !state.options[idx].showUnderwriting;
     renderOptions();
+    return;
+  }
+  const unitBtn = e.target.closest('[data-role="unit-btn"]');
+  if (unitBtn) {
+    const idx = +unitBtn.dataset.idx, key = unitBtn.dataset.key, newUnit = unitBtn.dataset.unit;
+    const opt = state.options[idx];
+    const oldUnit = fieldUnit(opt, key);
+    if (newUnit !== oldUnit) {
+      const rawVal = pn(opt.fields[key]);
+      if (rawVal) {
+        const months = oldUnit === "years" ? rawVal * 12 : rawVal;
+        const converted = newUnit === "years" ? months / 12 : months;
+        opt.fields[key] = String(roundUnitValue(converted, newUnit));
+      }
+      opt.units = opt.units || {};
+      opt.units[key] = newUnit;
+      saveDraft();
+      renderOptions();
+    }
   }
 });
 
@@ -1077,6 +1151,7 @@ container.addEventListener("change", e => {
   } else if (t.dataset.role === "structure") {
     state.options[idx].structure = t.value;
     state.options[idx].fields = {};
+    state.options[idx].units = {};
     state.options[idx].includeFirstMortgageTerms = false;
     saveDraft();
     renderOptions();
@@ -1140,6 +1215,26 @@ function showError(problems) {
   document.getElementById("errorBanner").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// Resolves one field's payload value: money defaults to "N/A", months
+// fields convert from whatever unit the user picked back to months (the
+// only unit the backend understands), everything else is a trimmed string.
+// Pushes a "required" problem for empty non-money/non-optional fields.
+function resolveFieldValue(opt, f, problems) {
+  const raw = opt.fields[f.key];
+  if (f.type === "money") return raw || "N/A";
+  if (f.type === "months") {
+    const trimmed = (raw || "").trim();
+    if (!trimmed) {
+      if (!OPTIONAL_TERM_FIELDS.has(f.key)) problems.push(`"${opt.label}": ${f.label} is required`);
+      return "N/A";
+    }
+    return String(roundUnitValue(monthsOf(opt, f.key), "months"));
+  }
+  const val = (raw || "").trim();
+  if (!val) problems.push(`"${opt.label}": ${f.label} is required`);
+  return val;
+}
+
 function buildPayload() {
   const problems = [];
   if (!state.property_address.trim()) problems.push("Property Address is required");
@@ -1151,31 +1246,11 @@ function buildPayload() {
 
   const options = activeOptions.map((opt, i) => {
     const out = { label: opt.label.trim() || `Option ${i + 1}`, structure: opt.structure };
-    STRUCTURE_FIELDS[opt.structure].forEach(f => {
-      let val = opt.fields[f.key];
-      if (f.type === "money" || OPTIONAL_TERM_FIELDS.has(f.key)) {
-        val = val || "N/A";
-      } else {
-        val = (val || "").trim();
-      }
-      if (f.type !== "money" && !OPTIONAL_TERM_FIELDS.has(f.key) && !val) {
-        problems.push(`"${opt.label}": ${f.label} is required`);
-      }
-      out[f.key] = val;
-    });
+    STRUCTURE_FIELDS[opt.structure].forEach(f => { out[f.key] = resolveFieldValue(opt, f, problems); });
     if (opt.structure === "seller_carryback") {
       out.include_first_mortgage_terms = !!opt.includeFirstMortgageTerms;
       if (opt.includeFirstMortgageTerms) {
-        FIRST_MORTGAGE_EXTRA_FIELDS.forEach(f => {
-          let val = opt.fields[f.key];
-          if (f.type === "money") {
-            val = val || "N/A";
-          } else {
-            val = (val || "").trim();
-            if (!val) problems.push(`"${opt.label}": ${f.label} is required`);
-          }
-          out[f.key] = val;
-        });
+        FIRST_MORTGAGE_EXTRA_FIELDS.forEach(f => { out[f.key] = resolveFieldValue(opt, f, problems); });
       }
     }
     if (opt.why.length) out.why_you_win = opt.why.slice();
