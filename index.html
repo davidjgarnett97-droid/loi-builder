@@ -748,20 +748,22 @@ const TEMPLATES = {
           includeFirstMortgageTerms: false
         },
         {
-          // Real duration unchanged (30mo term / 10mo balloon) -- only the
-          // displayed unit flips to years (2.5yr / 0.83yr), consistent
-          // with the form's Yr default. See roundUnitValue for the
-          // months->years rounding convention used everywhere else.
+          // Term/balloon are literal years -- 30yr term, 10yr balloon --
+          // not a months->years conversion of a shorter note. David: "I
+          // still want term length at 30 years and balloon payment at 10
+          // years" (2026-09-29), after the earlier 2.5yr/0.83yr conversion
+          // misread his intent.
           on: true, label: "Option 2 — Seller Finance", structure: "seller_finance",
-          fields: { price: formatMoney(String(base)), down: "N/A", length: "2.5", balloon: "0.83", rate: "3" },
+          fields: { price: formatMoney(String(base)), down: "N/A", length: "30", balloon: "10", rate: "3" },
           units: { length: "years", balloon: "years" },
           why: [],
           includeFirstMortgageTerms: false
         },
         {
-          // Real duration unchanged (30mo term / 7mo balloon).
+          // Same 30yr term, shorter (7yr) balloon than Option 2's 10yr --
+          // keeps the "shorter Balloon" bullet below true.
           on: true, label: "Option 3 — Seller Finance", structure: "seller_finance",
-          fields: { price: formatMoney(String(premium)), down: "N/A", length: "2.5", balloon: "0.58", rate: "0" },
+          fields: { price: formatMoney(String(premium)), down: "N/A", length: "30", balloon: "7", rate: "0" },
           units: { length: "years", balloon: "years" },
           why: [
             "You get a shorter Balloon",
@@ -770,13 +772,13 @@ const TEMPLATES = {
           includeFirstMortgageTerms: false
         },
         {
-          // Real duration unchanged (30mo carry term / 10mo carry balloon).
+          // Literal 30yr carry term, 10yr carry balloon (same as Option 2).
           on: true, label: "Option 4 — Seller Carryback", structure: "seller_carryback",
           fields: {
             price: formatMoney(String(carryTotal)),
             new_loan_amount: formatMoney(String(carryHalf)),
             carry_amount: formatMoney(String(carryHalf)),
-            carry_rate: "1", carry_length: "2.5", carry_balloon: "0.83"
+            carry_rate: "1", carry_length: "30", carry_balloon: "10"
           },
           units: { carry_length: "years", carry_balloon: "years" },
           why: [
