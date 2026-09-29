@@ -370,6 +370,40 @@
     border-radius: 8px;
     padding: 12px 14px;
   }
+  .uw-headline {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .uw-headline .k {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--gray);
+  }
+  .uw-headline .v {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .uw-details-toggle {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12px;
+    padding: 4px 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .uw-details { margin-top: 8px; }
   .uw-row {
     display: flex;
     justify-content: space-between;
@@ -628,7 +662,8 @@ function defaultOption(i) {
     units: {},
     why: [],
     includeFirstMortgageTerms: false,
-    showUnderwriting: false
+    showUnderwriting: false,
+    showUnderwritingDetails: false
   };
 }
 
@@ -946,7 +981,7 @@ function renderOptions() {
       if (opt.showUnderwriting) {
         const uwPanel = document.createElement("div");
         uwPanel.className = "uw-panel";
-        uwPanel.innerHTML = renderUnderwritingPanel(opt);
+        uwPanel.innerHTML = renderUnderwritingPanel(opt, idx);
         uwWrap.appendChild(uwPanel);
       }
       body.appendChild(uwWrap);
@@ -1020,22 +1055,27 @@ function piBreakdownRows(prefix, balance, ratePct, payment) {
   ];
 }
 
+// Returns { headline: {label,value}|null, pendingNote, rows, note }.
+// headline is the single "combined monthly payment" figure shown as soon as
+// the underwriting panel opens; everything else (breakdowns, balloon,
+// interest, all-in totals) sits in `rows`, revealed only behind the
+// panel's own "Show Details" sub-toggle.
 function computeUnderwriting(opt) {
   const f = opt.fields;
 
   if (opt.structure === "cash") {
-    return { rows: [], note: "Cash offer — no financing to underwrite." };
+    return { headline: null, pendingNote: "Cash offer — no financing to underwrite.", rows: [], note: "" };
   }
 
   if (opt.structure === "seller_finance") {
     const price = pm(f.price), down = pm(f.down), rate = pn(f.rate), term = monthsOf(opt, "length"), balloon = monthsOf(opt, "balloon");
     const principal = Math.max(0, price - down);
-    if (!term) return { rows: [], note: "Enter a term to compute payment math." };
+    if (!term) return { headline: null, pendingNote: "Enter a term to compute payment math.", rows: [], note: "" };
     const s = loanStatsM(principal, rate, term, balloon);
     return {
+      headline: { label: "Monthly Payment", value: mm(s.payment) },
       rows: [
         uwRow("Financed Principal", mm(principal)),
-        uwRow("Monthly Payment", mm(s.payment)),
         ...piBreakdownRows("Monthly Payment", principal, rate, s.payment),
         uwRow("Balloon Payoff Due", s.fullyAmortized ? "$0 (fully amortized)" : mm(s.payoff)),
         uwRow("Total Interest to Balloon", mm(s.totalInterestToBalloon)),
@@ -1051,7 +1091,6 @@ function computeUnderwriting(opt) {
     const rows = [];
     let note;
     if (!remTerm) {
-      rows.push(uwRow("Stated Monthly PITI", mm(piti)));
       note = "Enter the existing loan's remaining term to break this out into real principal/interest instead of just the stated PITI.";
     } else {
       const pAndI = tranchePaymentM(balance, exRate, remTerm);
@@ -1063,6 +1102,9 @@ function computeUnderwriting(opt) {
       rows.push(uwRow("Existing Note — Payoff at Term End", "$0 (fully amortizing)"));
       note = "Computed P&I is principal+interest only on the existing balance/rate/remaining term — stated PITI runs higher if it includes taxes/insurance.";
     }
+
+    let headlineValue = piti;
+    let headlineLabel = "Monthly Payment (Stated PITI)";
     if (opt.structure === "hybrid") {
       const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = monthsOf(opt, "carry_length"), carryBalloon = monthsOf(opt, "carry_balloon");
       if (carryTerm) {
@@ -1072,13 +1114,14 @@ function computeUnderwriting(opt) {
         rows.push(uwRow("Seller Carry — Balloon Payoff Due", cs.fullyAmortized ? "$0 (fully amortized)" : mm(cs.payoff)));
         rows.push(uwRow("Seller Carry — Total Interest to Balloon", mm(cs.totalInterestToBalloon)));
         rows.push(uwRow("Seller Carry — All-In Total at Balloon", mm(cs.allIn)));
-        rows.push(uwRow("Combined Monthly Payment (PITI + Carry)", mm(piti + cs.payment)));
+        headlineValue = piti + cs.payment;
+        headlineLabel = "Combined Monthly Payment (PITI + Carry)";
       } else {
         rows.push(uwRow("Seller Carry", "Enter a carry term to compute payment math."));
       }
     }
     rows.push(uwRow("Cash to Seller (stated)", mm(pm(f.cash_to_seller))));
-    return { rows, note };
+    return { headline: { label: headlineLabel, value: mm(headlineValue) }, rows, note };
   }
 
   if (opt.structure === "seller_carryback") {
@@ -1099,6 +1142,7 @@ function computeUnderwriting(opt) {
     } else {
       rows.push(uwRow("1st Mortgage", "Toggle \"Include First Mortgage Terms\" to add its payment to the combined total."));
     }
+    let headline = null, pendingNote;
     if (carryTerm) {
       const s = loanStatsM(carryAmt, carryRate, carryTerm, carryBalloon);
       rows.push(uwRow("Seller Carry (2nd) — Monthly Payment", mm(s.payment)));
@@ -1108,26 +1152,44 @@ function computeUnderwriting(opt) {
       rows.push(uwRow("Seller Carry (2nd) — Total Interest at Full Term", mm(s.totalInterestFullTerm)));
       rows.push(uwRow("Seller Carry (2nd) — All-In Total at Balloon", mm(s.allIn)));
       combinedMonthly += s.payment;
-      rows.push(uwRow("Combined Monthly Payment (1st + 2nd)", mm(combinedMonthly)));
+      headline = {
+        label: opt.includeFirstMortgageTerms ? "Combined Monthly Payment (1st + 2nd)" : "Monthly Payment (Carry Only)",
+        value: mm(combinedMonthly)
+      };
     } else {
       rows.push(uwRow("Seller Carry (2nd)", "Enter a carry term to compute payment math."));
+      pendingNote = "Enter the seller carry term to compute a combined monthly payment.";
     }
     return {
+      headline,
+      pendingNote,
       rows,
       note: "1st mortgage payment is a calculated amortized P&I off its own rate/term/loan amount, same as seller carry (2nd) — both are real amortizations, not stated figures."
     };
   }
 
-  return { rows: [], note: "" };
+  return { headline: null, pendingNote: "", rows: [], note: "" };
 }
 
-function renderUnderwritingPanel(opt) {
+function renderUnderwritingPanel(opt, idx) {
   const result = computeUnderwriting(opt);
-  const rowsHtml = result.rows.map(r =>
-    `<div class="uw-row"><span class="k">${escapeHtml(r.label)}</span><span class="v">${escapeHtml(r.value)}</span></div>`
-  ).join("");
-  const noteHtml = result.note ? `<div class="uw-note">${escapeHtml(result.note)}</div>` : "";
-  return rowsHtml + noteHtml;
+  let html = "";
+  if (result.headline) {
+    html += `<div class="uw-headline"><span class="k">${escapeHtml(result.headline.label)}</span><span class="v">${escapeHtml(result.headline.value)}</span></div>`;
+  } else if (result.pendingNote) {
+    html += `<div class="uw-note" style="margin-top:0;">${escapeHtml(result.pendingNote)}</div>`;
+  }
+  if (result.rows.length) {
+    html += `<button type="button" class="uw-details-toggle" data-role="uw-details-toggle" data-idx="${idx}">${opt.showUnderwritingDetails ? "Hide Details ▲" : "Show Details ▼"}</button>`;
+    if (opt.showUnderwritingDetails) {
+      const rowsHtml = result.rows.map(r =>
+        `<div class="uw-row"><span class="k">${escapeHtml(r.label)}</span><span class="v">${escapeHtml(r.value)}</span></div>`
+      ).join("");
+      const noteHtml = result.note ? `<div class="uw-note">${escapeHtml(result.note)}</div>` : "";
+      html += `<div class="uw-details">${rowsHtml}${noteHtml}</div>`;
+    }
+  }
+  return html;
 }
 
 container.addEventListener("click", e => {
@@ -1156,6 +1218,13 @@ container.addEventListener("click", e => {
   if (uwBtn) {
     const idx = +uwBtn.dataset.idx;
     state.options[idx].showUnderwriting = !state.options[idx].showUnderwriting;
+    renderOptions();
+    return;
+  }
+  const uwDetailsBtn = e.target.closest('[data-role="uw-details-toggle"]');
+  if (uwDetailsBtn) {
+    const idx = +uwDetailsBtn.dataset.idx;
+    state.options[idx].showUnderwritingDetails = !state.options[idx].showUnderwritingDetails;
     renderOptions();
     return;
   }
