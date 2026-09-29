@@ -288,6 +288,21 @@
     color: var(--accent-ink);
   }
 
+  .computed-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--navy);
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 10px 11px;
+  }
+  .computed-value.pending {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--gray);
+  }
+
   .why-block { margin-top: 14px; }
   .why-add {
     display: flex;
@@ -571,10 +586,12 @@ const STRUCTURE_FIELDS = {
 // option's "Include First Mortgage Terms" toggle is on. David: needed for
 // offers going to an investor, where the first-position loan's own terms
 // matter to the reader (unlike a normal seller offer, where they don't).
+// first_mortgage_payment is NOT collected here -- it's calculated from
+// new_loan_amount + rate + term (see calcFirstMortgagePayment) so the
+// number is always internally consistent, not hand-typed.
 const FIRST_MORTGAGE_EXTRA_FIELDS = [
   { key: "first_mortgage_rate", label: "First Mortgage Rate", type: "rate" },
-  { key: "first_mortgage_length", label: "First Mortgage Term", type: "months" },
-  { key: "first_mortgage_payment", label: "First Mortgage Monthly Payment", type: "money" }
+  { key: "first_mortgage_length", label: "First Mortgage Term", type: "months" }
 ];
 const STRUCTURE_LABELS = {
   cash: "Cash",
@@ -631,6 +648,17 @@ function monthsOf(opt, key) {
   return fieldUnit(opt, key) === "years" ? raw * 12 : raw;
 }
 function roundUnitValue(v, unit) { return unit === "years" ? Math.round(v * 100) / 100 : Math.round(v); }
+
+// First mortgage payment is always derived, never hand-typed -- see
+// FIRST_MORTGAGE_EXTRA_FIELDS. Returns null if there's not yet enough
+// input (term) to compute anything.
+function calcFirstMortgagePayment(opt) {
+  const fmLoan = pm(opt.fields.new_loan_amount);
+  const fmRate = pn(opt.fields.first_mortgage_rate);
+  const fmTerm = monthsOf(opt, "first_mortgage_length");
+  if (!fmTerm) return null;
+  return { loan: fmLoan, rate: fmRate, term: fmTerm, payment: tranchePaymentM(fmLoan, fmRate, fmTerm) };
+}
 
 let state = {
   property_address: "",
@@ -871,6 +899,17 @@ function renderOptions() {
           fmtGrid.appendChild(wrap);
         });
         body.appendChild(fmtGrid);
+
+        const calc = calcFirstMortgagePayment(opt);
+        const calcWrap = document.createElement("label");
+        calcWrap.className = "field";
+        calcWrap.style.marginTop = "10px";
+        calcWrap.innerHTML = calc
+          ? `<span class="label-text">First Mortgage Monthly Payment (calculated)</span>
+             <div class="computed-value">${formatMoney(String(Math.round(calc.payment)))}</div>`
+          : `<span class="label-text">First Mortgage Monthly Payment</span>
+             <div class="computed-value pending">Enter the term above to calculate P&amp;I from the loan amount and rate.</div>`;
+        body.appendChild(calcWrap);
       }
     }
 
@@ -1044,13 +1083,16 @@ function computeUnderwriting(opt) {
     const rows = [];
     let combinedMonthly = 0;
     if (opt.includeFirstMortgageTerms) {
-      const fmPayment = pm(f.first_mortgage_payment), fmTerm = monthsOf(opt, "first_mortgage_length"), fmLoan = pm(f.new_loan_amount);
-      const fmRate = pn(f.first_mortgage_rate);
-      const fmTotalInterest = fmPayment * fmTerm - fmLoan;
-      rows.push(uwRow("1st Mortgage — Stated Payment", mm(fmPayment)));
-      rows.push(...piBreakdownRows("1st Mortgage", fmLoan, fmRate, fmPayment));
-      rows.push(uwRow("1st Mortgage — Total Interest (Full Term, from stated payment)", mm(fmTotalInterest)));
-      combinedMonthly += fmPayment;
+      const calc = calcFirstMortgagePayment(opt);
+      if (!calc) {
+        rows.push(uwRow("1st Mortgage", "Enter a term to calculate the payment."));
+      } else {
+        const fmTotalInterest = calc.payment * calc.term - calc.loan;
+        rows.push(uwRow("1st Mortgage — Monthly Payment (calculated)", mm(calc.payment)));
+        rows.push(...piBreakdownRows("1st Mortgage", calc.loan, calc.rate, calc.payment));
+        rows.push(uwRow("1st Mortgage — Total Interest (Full Term)", mm(fmTotalInterest)));
+        combinedMonthly += calc.payment;
+      }
     } else {
       rows.push(uwRow("1st Mortgage", "Toggle \"Include First Mortgage Terms\" to add its payment to the combined total."));
     }
@@ -1069,7 +1111,7 @@ function computeUnderwriting(opt) {
     }
     return {
       rows,
-      note: "1st mortgage total interest is derived from the stated monthly payment (only the payment is required input), not re-derived from a separate rate/term amortization. Seller carry (2nd) is a full amortization off its own rate/term/balloon."
+      note: "1st mortgage payment is a calculated amortized P&I off its own rate/term/loan amount, same as seller carry (2nd) — both are real amortizations, not stated figures."
     };
   }
 
@@ -1251,6 +1293,13 @@ function buildPayload() {
       out.include_first_mortgage_terms = !!opt.includeFirstMortgageTerms;
       if (opt.includeFirstMortgageTerms) {
         FIRST_MORTGAGE_EXTRA_FIELDS.forEach(f => { out[f.key] = resolveFieldValue(opt, f, problems); });
+        const calc = calcFirstMortgagePayment(opt);
+        if (!calc) {
+          problems.push(`"${opt.label}": First Mortgage Term is required to calculate the payment`);
+          out.first_mortgage_payment = "N/A";
+        } else {
+          out.first_mortgage_payment = formatMoney(String(Math.round(calc.payment)));
+        }
       }
     }
     if (opt.why.length) out.why_you_win = opt.why.slice();
