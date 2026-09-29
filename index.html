@@ -907,6 +907,22 @@ function loanStatsM(principal, ratePct, termMonths, balloonMonths) {
 function uwRow(label, value) { return { label, value }; }
 function mm(n) { return formatMoney(String(Math.round(n))); }
 
+// First-payment principal/interest split -- the split shifts every month on
+// an amortizing loan, so "the" P&I breakdown is inherently a month-1 snapshot,
+// not a constant. Labeled as such in every row that uses it.
+function splitPI(balance, ratePct, payment) {
+  const interest = balance * ((ratePct || 0) / 100 / 12);
+  const principal = Math.max(0, payment - interest);
+  return { interest, principal };
+}
+function piBreakdownRows(prefix, balance, ratePct, payment) {
+  const s = splitPI(balance, ratePct, payment);
+  return [
+    uwRow(`${prefix} — Principal (Month 1)`, mm(s.principal)),
+    uwRow(`${prefix} — Interest (Month 1)`, mm(s.interest))
+  ];
+}
+
 function computeUnderwriting(opt) {
   const f = opt.fields;
 
@@ -923,12 +939,13 @@ function computeUnderwriting(opt) {
       rows: [
         uwRow("Financed Principal", mm(principal)),
         uwRow("Monthly Payment", mm(s.payment)),
+        ...piBreakdownRows("Monthly Payment", principal, rate, s.payment),
         uwRow("Balloon Payoff Due", s.fullyAmortized ? "$0 (fully amortized)" : mm(s.payoff)),
         uwRow("Total Interest to Balloon", mm(s.totalInterestToBalloon)),
         uwRow("Total Interest at Full Term", mm(s.totalInterestFullTerm)),
         uwRow("All-In Total at Balloon", mm(s.allIn))
       ],
-      note: "Payment = amortizing P&I on the financed principal (price − down) at the stated rate/term. Balloon payoff is the remaining balance owed at the balloon date."
+      note: "Payment = amortizing P&I on the financed principal (price − down) at the stated rate/term. Principal/interest split shifts every month as the loan pays down — shown here is month 1. Balloon payoff is the remaining balance owed at the balloon date."
     };
   }
 
@@ -943,6 +960,7 @@ function computeUnderwriting(opt) {
       const pAndI = tranchePaymentM(balance, exRate, remTerm);
       const totalInterest = pAndI * remTerm - balance;
       rows.push(uwRow("Existing Note — Computed P&I", mm(pAndI)));
+      rows.push(...piBreakdownRows("Existing Note", balance, exRate, pAndI));
       rows.push(uwRow("Existing Note — Stated PITI", mm(piti)));
       rows.push(uwRow("Existing Note — Total Interest (Remaining Term)", mm(totalInterest)));
       rows.push(uwRow("Existing Note — Payoff at Term End", "$0 (fully amortizing)"));
@@ -953,6 +971,7 @@ function computeUnderwriting(opt) {
       if (carryTerm) {
         const cs = loanStatsM(carryAmt, carryRate, carryTerm, carryBalloon);
         rows.push(uwRow("Seller Carry — Monthly Payment", mm(cs.payment)));
+        rows.push(...piBreakdownRows("Seller Carry", carryAmt, carryRate, cs.payment));
         rows.push(uwRow("Seller Carry — Balloon Payoff Due", cs.fullyAmortized ? "$0 (fully amortized)" : mm(cs.payoff)));
         rows.push(uwRow("Seller Carry — Total Interest to Balloon", mm(cs.totalInterestToBalloon)));
         rows.push(uwRow("Seller Carry — All-In Total at Balloon", mm(cs.allIn)));
@@ -971,8 +990,10 @@ function computeUnderwriting(opt) {
     let combinedMonthly = 0;
     if (opt.includeFirstMortgageTerms) {
       const fmPayment = pm(f.first_mortgage_payment), fmTerm = pn(f.first_mortgage_length), fmLoan = pm(f.new_loan_amount);
+      const fmRate = pn(f.first_mortgage_rate);
       const fmTotalInterest = fmPayment * fmTerm - fmLoan;
       rows.push(uwRow("1st Mortgage — Stated Payment", mm(fmPayment)));
+      rows.push(...piBreakdownRows("1st Mortgage", fmLoan, fmRate, fmPayment));
       rows.push(uwRow("1st Mortgage — Total Interest (Full Term, from stated payment)", mm(fmTotalInterest)));
       combinedMonthly += fmPayment;
     } else {
@@ -981,6 +1002,7 @@ function computeUnderwriting(opt) {
     if (carryTerm) {
       const s = loanStatsM(carryAmt, carryRate, carryTerm, carryBalloon);
       rows.push(uwRow("Seller Carry (2nd) — Monthly Payment", mm(s.payment)));
+      rows.push(...piBreakdownRows("Seller Carry (2nd)", carryAmt, carryRate, s.payment));
       rows.push(uwRow("Seller Carry (2nd) — Balloon Payoff Due", s.fullyAmortized ? "$0 (fully amortized)" : mm(s.payoff)));
       rows.push(uwRow("Seller Carry (2nd) — Total Interest to Balloon", mm(s.totalInterestToBalloon)));
       rows.push(uwRow("Seller Carry (2nd) — Total Interest at Full Term", mm(s.totalInterestFullTerm)));
