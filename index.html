@@ -1498,6 +1498,38 @@ document.getElementById("propertyAddress").value = state.property_address;
 document.getElementById("purchasedFrom").value = state.purchased_from;
 document.getElementById("purchasedBy").value = state.purchased_by;
 renderOptions();
+
+// Handoff from the underwriting tool (/uw on the same tailnet origin). Only
+// ever present when this page is served from the tailnet host -- the
+// github.io copy has a different origin and never sees it. Replaces the
+// current options, after a confirm if the form already holds data.
+(function applyUnderwritingHandoff() {
+  const KEY = "nexus-loi-handoff";
+  let raw = null;
+  try { raw = localStorage.getItem(KEY); } catch (e) { return; }
+  if (!raw) return;
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  let h;
+  try { h = JSON.parse(raw); } catch (e) { showError(["Underwriting handoff was unreadable — nothing loaded."]); return; }
+  if (!h || !Array.isArray(h.options) || !h.options.length || Date.now() - h.at > 60 * 60 * 1000) return;
+
+  const hasData = state.property_address.trim() || state.purchased_from.trim() || state.purchased_by.trim() ||
+    state.options.some(o => Object.keys(o.fields || {}).length || (o.why && o.why.length));
+  if (hasData && !confirm(`Replace the current options with ${h.options.length} option(s) from Underwriting?`)) return;
+
+  state.options = Array.from({length: MAX_OPTIONS}, (_, i) => h.options[i] || Object.assign(defaultOption(i), { on: false }));
+  if (h.property_address) {
+    state.property_address = h.property_address;
+    document.getElementById("propertyAddress").value = h.property_address;
+  }
+  renderOptions();
+  const notes = (h.skipped || []).map(s => "Not transferred: " + s);
+  if (notes.length) showError(notes);
+  const status = document.getElementById("statusText");
+  status.textContent = `Loaded ${h.options.length} option(s) from Underwriting ✓`;
+  status.classList.add("show");
+  setTimeout(() => status.classList.remove("show"), 4000);
+})();
 </script>
 
 </body>
