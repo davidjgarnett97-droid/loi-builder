@@ -662,10 +662,20 @@ function defaultOption(i) {
     units: {},
     why: [],
     includeFirstMortgageTerms: false,
+    liens: [],
     showUnderwriting: false,
     showUnderwritingDetails: false
   };
 }
+
+// Subject-To / Hybrid: the existing_* fields are lien 1; any further liens on
+// the property live in opt.liens as {balance, rate, payment}.
+const LIEN_FIELDS = [
+  { key: "balance", label: "Balance", type: "money" },
+  { key: "rate", label: "Rate", type: "rate" },
+  { key: "payment", label: "Monthly Payment", type: "money" }
+];
+const hasLiens = opt => opt.structure === "subject_to" || opt.structure === "hybrid";
 
 // Fields that don't block Send even when left blank -- underwriting math
 // degrades gracefully (see computeUnderwriting) rather than requiring input
@@ -922,6 +932,41 @@ function renderOptions() {
     });
     body.appendChild(grid);
 
+    if (hasLiens(opt)) {
+      const liensWrap = document.createElement("div");
+      liensWrap.style.marginTop = "12px";
+      (opt.liens || []).forEach((lien, lIdx) => {
+        const row = document.createElement("div");
+        row.style.cssText = "margin-bottom:12px;";
+        row.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <span class="label-text">Lien ${lIdx + 2}</span>
+            <button type="button" data-role="lien-del" data-idx="${idx}" data-lidx="${lIdx}">✕</button>
+          </div>
+          <div class="fields-grid"></div>`;
+        const lg = row.querySelector(".fields-grid");
+        LIEN_FIELDS.forEach(f => {
+          const wrap = document.createElement("label");
+          wrap.className = "field";
+          const cur = lien[f.key] || "";
+          wrap.innerHTML = `<span class="label-text">${f.label}</span>
+            <input type="text" inputmode="${f.type === 'rate' ? 'decimal' : 'text'}"
+              data-role="lien" data-idx="${idx}" data-lidx="${lIdx}" data-key="${f.key}" data-type="${f.type}"
+              value="${escapeAttr(f.type === "money" ? moneyDisplayValue(cur) : cur)}">`;
+          lg.appendChild(wrap);
+        });
+        liensWrap.appendChild(row);
+      });
+      const addLien = document.createElement("button");
+      addLien.type = "button";
+      addLien.className = "secondary";
+      addLien.dataset.role = "lien-add";
+      addLien.dataset.idx = idx;
+      addLien.textContent = "+ Add another lien";
+      liensWrap.appendChild(addLien);
+      body.appendChild(liensWrap);
+    }
+
     if (opt.structure === "seller_carryback") {
       const fmtToggle = document.createElement("div");
       fmtToggle.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px;";
@@ -1113,6 +1158,15 @@ function computeUnderwriting(opt) {
 
     let headlineValue = piti;
     let headlineLabel = "Monthly Payment (Stated PITI)";
+    const extraLiens = opt.liens || [];
+    if (extraLiens.length) {
+      const totalBal = balance + extraLiens.reduce((a, l) => a + pm(l.balance), 0);
+      const extraPay = extraLiens.reduce((a, l) => a + pm(l.payment), 0);
+      extraLiens.forEach((l, n) => rows.push(uwRow(`Lien ${n + 2} — ${mm(pm(l.balance))} @ ${pn(l.rate)}%`, `${mm(pm(l.payment))}/mo`)));
+      rows.push(uwRow("Total Existing Balance (all liens)", mm(totalBal)));
+      headlineValue = piti + extraPay;
+      headlineLabel = "Monthly Payment (All Liens, Stated)";
+    }
     if (opt.structure === "hybrid") {
       const carryAmt = pm(f.carry_amount), carryRate = pn(f.carry_rate), carryTerm = monthsOf(opt, "carry_length"), carryBalloon = monthsOf(opt, "carry_balloon");
       if (carryTerm) {
@@ -1122,8 +1176,8 @@ function computeUnderwriting(opt) {
         rows.push(uwRow("Seller Carry — Balloon Payoff Due", cs.fullyAmortized ? "$0 (fully amortized)" : mm(cs.payoff)));
         rows.push(uwRow("Seller Carry — Total Interest to Balloon", mm(cs.totalInterestToBalloon)));
         rows.push(uwRow("Seller Carry — All-In Total at Balloon", mm(cs.allIn)));
-        headlineValue = piti + cs.payment;
-        headlineLabel = "Combined Monthly Payment (PITI + Carry)";
+        headlineValue = headlineValue + cs.payment;
+        headlineLabel = "Combined Monthly Payment (Liens + Carry)";
       } else {
         rows.push(uwRow("Seller Carry", "Enter a carry term to compute payment math."));
       }
@@ -1222,6 +1276,22 @@ container.addEventListener("click", e => {
     renderOptions();
     return;
   }
+  const lienAdd = e.target.closest('[data-role="lien-add"]');
+  if (lienAdd) {
+    const opt = state.options[+lienAdd.dataset.idx];
+    opt.liens = opt.liens || [];
+    opt.liens.push({ balance: "", rate: "", payment: "" });
+    saveDraft();
+    renderOptions();
+    return;
+  }
+  const lienDel = e.target.closest('[data-role="lien-del"]');
+  if (lienDel) {
+    state.options[+lienDel.dataset.idx].liens.splice(+lienDel.dataset.lidx, 1);
+    saveDraft();
+    renderOptions();
+    return;
+  }
   const uwBtn = e.target.closest('[data-role="uw-toggle"]');
   if (uwBtn) {
     const idx = +uwBtn.dataset.idx;
@@ -1275,6 +1345,13 @@ container.addEventListener("change", e => {
     state.options[idx].fields = {};
     state.options[idx].units = {};
     state.options[idx].includeFirstMortgageTerms = false;
+    state.options[idx].liens = [];
+    saveDraft();
+    renderOptions();
+  } else if (t.dataset.role === "lien") {
+    let val = t.value;
+    if (t.dataset.type === "money") val = formatMoney(val);
+    state.options[idx].liens[+t.dataset.lidx][t.dataset.key] = val;
     saveDraft();
     renderOptions();
   } else if (t.dataset.role === "fmt-toggle") {
@@ -1375,6 +1452,17 @@ function buildPayload() {
   const options = activeOptions.map((opt, i) => {
     const out = { label: opt.label.trim() || `Option ${i + 1}`, structure: opt.structure };
     STRUCTURE_FIELDS[opt.structure].forEach(f => { out[f.key] = resolveFieldValue(opt, f, problems); });
+    if (hasLiens(opt) && (opt.liens || []).length) {
+      out.additional_liens = opt.liens.map((l, n) => {
+        const lien = {};
+        LIEN_FIELDS.forEach(f => {
+          const v = (l[f.key] || "").trim();
+          if (!v && f.type === "rate") problems.push(`"${opt.label}": Lien ${n + 2} ${f.label} is required`);
+          lien[f.key] = v || "N/A";
+        });
+        return lien;
+      });
+    }
     if (opt.structure === "seller_carryback") {
       out.include_first_mortgage_terms = !!opt.includeFirstMortgageTerms;
       if (opt.includeFirstMortgageTerms) {
