@@ -675,6 +675,7 @@ const LIEN_FIELDS = [
   { key: "rate", label: "Rate", type: "rate" },
   { key: "payment", label: "Monthly Payment", type: "money" }
 ];
+const ordinal = n => n + (n % 100 >= 10 && n % 100 <= 20 ? "th" : ({1:"st",2:"nd",3:"rd"}[n % 10] || "th"));
 const hasLiens = opt => opt.structure === "subject_to" || opt.structure === "hybrid";
 
 // Fields that don't block Send even when left blank -- underwriting math
@@ -940,7 +941,7 @@ function renderOptions() {
         row.style.cssText = "margin-bottom:12px;";
         row.innerHTML = `
           <div style="display:flex; align-items:center; justify-content:space-between;">
-            <span class="label-text">Lien ${lIdx + 2}</span>
+            <span class="label-text">${ordinal(lIdx + 2)} Lien</span>
             <button type="button" data-role="lien-del" data-idx="${idx}" data-lidx="${lIdx}">✕</button>
           </div>
           <div class="fields-grid"></div>`;
@@ -1162,7 +1163,7 @@ function computeUnderwriting(opt) {
     if (extraLiens.length) {
       const totalBal = balance + extraLiens.reduce((a, l) => a + pm(l.balance), 0);
       const extraPay = extraLiens.reduce((a, l) => a + pm(l.payment), 0);
-      extraLiens.forEach((l, n) => rows.push(uwRow(`Lien ${n + 2} — ${mm(pm(l.balance))} @ ${pn(l.rate)}%`, `${mm(pm(l.payment))}/mo`)));
+      extraLiens.forEach((l, n) => rows.push(uwRow(`${ordinal(n + 2)} Lien — ${mm(pm(l.balance))} @ ${pn(l.rate)}%`, `${mm(pm(l.payment))}/mo`)));
       rows.push(uwRow("Total Existing Balance (all liens)", mm(totalBal)));
       headlineValue = piti + extraPay;
       headlineLabel = "Monthly Payment (All Liens, Stated)";
@@ -1457,7 +1458,7 @@ function buildPayload() {
         const lien = {};
         LIEN_FIELDS.forEach(f => {
           const v = (l[f.key] || "").trim();
-          if (!v && f.type === "rate") problems.push(`"${opt.label}": Lien ${n + 2} ${f.label} is required`);
+          if (!v && f.type === "rate") problems.push(`"${opt.label}": ${ordinal(n + 2)} Lien ${f.label} is required`);
           lien[f.key] = v || "N/A";
         });
         return lien;
